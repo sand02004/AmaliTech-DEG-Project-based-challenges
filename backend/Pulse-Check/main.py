@@ -10,6 +10,12 @@ app = FastAPI()
 monitors = {}
 
 
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "monitors": len(monitors)}
+
+
 class MonitorIn(BaseModel):
     id: str
     timeout: int = Field(gt=0)
