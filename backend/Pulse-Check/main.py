@@ -1,6 +1,7 @@
 import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+import threading
 
 app = FastAPI()
 
@@ -42,3 +43,14 @@ def heartbeat(monitor_id: str):
     monitor["expires_at"] = time.time() + monitor["timeout"]
     monitor["status"] = "active"
     return {"message": "Heartbeat received"}
+
+def check_monitors():
+    while True:
+        now = time.time()
+        for monitor_id, monitor in list(monitors.items()):
+            if monitor["status"] == "active" and now > monitor["expires_at"]:
+                monitor["status"] = "down"
+                print({"ALERT": f"Device {monitor_id} is down!", "time": now})
+        time.sleep(1)
+
+threading.Thread(target=check_monitors, daemon=True).start()
