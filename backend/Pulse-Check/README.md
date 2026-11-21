@@ -78,6 +78,7 @@ The API runs at `http://127.0.0.1:8000`. You can test every endpoint from `http:
 | POST | `/monitors/{id}/heartbeat` | Reset the timer (also un-pauses) |
 | POST | `/monitors/{id}/pause` | Pause the monitor |
 | GET | `/monitors/{id}` | See the monitor's status |
+| GET | `/health` | Check that the server is running |
 
 ### Create a monitor
 
@@ -94,7 +95,7 @@ Response `201 Created`:
 ```
 
 - `409` if a monitor with that id already exists
-- `422` if a field is missing or `timeout` is 0 or negative
+- `422` if a field is missing, `timeout` is 0 or negative, or `alert_email` is not a valid email
 
 ### Send a heartbeat
 
@@ -136,6 +137,18 @@ Response `200 OK`:
 
 - `404` if the monitor doesn't exist
 - `seconds_left` is `null` when the monitor is paused or down
+
+### Health check
+
+`GET /health`
+
+Response `200 OK`:
+
+```json
+{"status": "ok", "monitors": 2}
+```
+
+`monitors` is the number of registered devices.
 
 ### The alert
 
