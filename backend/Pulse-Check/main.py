@@ -3,7 +3,7 @@ import threading
 import time
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 app = FastAPI()
 
@@ -13,7 +13,7 @@ monitors = {}
 class MonitorIn(BaseModel):
     id: str
     timeout: int = Field(gt=0)
-    alert_email: str
+    alert_email: EmailStr
 
 
 @app.post("/monitors", status_code=201)
