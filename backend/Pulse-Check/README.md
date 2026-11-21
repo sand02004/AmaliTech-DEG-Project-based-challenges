@@ -1,156 +1,168 @@
-# Pulse-Check-API ("Watchdog" Sentinel)
+# Pulse-Check API
 
-This challenge is designed to test your ability to bridge Computer Science fundamentals with Modern Backend Engineering.
+This is my solution to the Pulse-Check (Watchdog Sentinel) challenge. It is a Dead Man's Switch API for CritMon Servers. Each device registers a monitor with a timeout. The device has to send a heartbeat before the timeout ends. If it doesn't, the API marks the device as `down` and prints an alert.
 
-## 1. Business Context
+Built with Python, FastAPI and Uvicorn. Monitors are stored in memory (a Python dictionary).
 
-> **Client:** _CritMon Servers Inc._ (A Critical Infrastructure Monitoring Company).
+## Architecture
 
-### The Problem
+### State diagram
 
-CritMon provides monitoring for remote solar farms and unmanned weather stations in areas with poor connectivity. These devices are supposed to send "I'm alive" signals every hour.
+A monitor is always in one of three states: `active`, `paused` or `down`.
 
-Currently, CritMon has no way of knowing if a device has gone offline (due to power failure or theft) until a human manually checks the logs. They need a system that alerts _them_ when a device _stops_ talking.
+```mermaid
+stateDiagram-v2
+    [*] --> active: POST /monitors
+    active --> active: heartbeat (timer reset)
+    active --> paused: POST /pause
+    paused --> active: heartbeat (timer restarts)
+    active --> down: timer reaches 0 (alert fired)
+    down --> active: heartbeat (device back online)
+```
 
-### The Solution
+### Sequence diagram
 
-You need to build a **Dead Man’s Switch API**. Devices will register a "monitor" with a countdown timer (e.g., 60 seconds). If the device fails to "ping" (send a heartbeat) to the API before the timer runs out, the system automatically triggers an alert.
+```mermaid
+sequenceDiagram
+    participant D as Device
+    participant A as API
+    participant S as monitors (memory)
+    participant C as Background checker
 
----
+    D->>A: POST /monitors {id, timeout, alert_email}
+    A->>S: save monitor (status active, expires_at = now + timeout)
+    A-->>D: 201 Created
 
-## 2. Technical Objective
+    loop while the device is alive
+        D->>A: POST /monitors/{id}/heartbeat
+        A->>S: expires_at = now + timeout
+        A-->>D: 200 OK
+    end
 
-Build a backend service that manages stateful timers.
+    loop every 1 second
+        C->>S: check all monitors
+        alt active and now > expires_at
+            C->>S: status = down
+            C->>C: print ALERT JSON
+        end
+    end
+```
 
-- **Registration:** Allow a client to create a monitor with a specific timeout duration.
-- **Heartbeat:** Reset the countdown when a ping is received.
-- **Trigger:** Fire a webhook (or log a critical error) if the countdown reaches zero.
+### How it works
 
----
+When a monitor is created I save `expires_at = now + timeout`. A heartbeat just moves `expires_at` forward again. A background thread starts with the server and checks all monitors every second. If a monitor is `active` and the current time is past its `expires_at`, it changes to `down` and the alert is printed. Paused and down monitors are skipped, so they don't send alerts.
 
-## 3. Getting Started
+## Setup
 
-1.  **Fork this Repository:** Do not clone it directly. Create a fork to your own GitHub account.
-2.  **Environment:** You may use **Node.js, Python, Java or Go, etc.**.
-3.  **Submission:** Your final submission will be a link to your forked repository containing:
-    - The source code.
-    - The **Architecture Diagram**
-    - The `README.md` with documentation.
+You need Python 3.10 or newer.
 
----
+```bash
+git clone https://github.com/sand02004/AmaliTech-DEG-Project-based-challenges.git
+cd AmaliTech-DEG-Project-based-challenges/backend/Pulse-Check
 
-## 4. The Architecture Diagram
+python -m venv venv
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # Mac / Linux
 
-**Task:** Before you write any code, you must design the logic flow.
-**Deliverable:** A **Sequence Diagram** or **State Flowchart** embedded in your `README.md`.
+pip install -r requirements.txt
+python -m uvicorn main:app --reload
+```
 
----
+The API runs at `http://127.0.0.1:8000`. You can test every endpoint from `http://127.0.0.1:8000/docs`.
 
-## 5. User Stories & Acceptance Criteria
+## API Endpoints
 
-### User Story 1: Registering a Monitor
+| Method | Endpoint | What it does |
+|---|---|---|
+| POST | `/monitors` | Create a monitor |
+| POST | `/monitors/{id}/heartbeat` | Reset the timer (also un-pauses) |
+| POST | `/monitors/{id}/pause` | Pause the monitor |
+| GET | `/monitors/{id}` | See the monitor's status |
 
-**As a** device administrator,
-**I want to** create a new monitor for my device,
-**So that** the system knows to track its status.
+### Create a monitor
 
-**Acceptance Criteria:**
+`POST /monitors`
 
-- [ ] The API accepts a `POST /monitors` request.
-- [ ] Input: `{"id": "device-123", "timeout": 60, "alert_email": "admin@critmon.com"}`.
-- [ ] The system starts a countdown timer for 60 seconds associated with `device-123`.
-- [ ] Response: `201 Created` with a confirmation message.
+```json
+{"id": "device-123", "timeout": 60, "alert_email": "admin@critmon.com"}
+```
 
-### User Story 2: The Heartbeat (Reset)
+Response `201 Created`:
 
-**As a** remote device,
-**I want to** send a signal to the server,
-**So that** my timer is reset and no alert is sent.
+```json
+{"message": "Monitor device-123 created"}
+```
 
-**Acceptance Criteria:**
+- `409` if a monitor with that id already exists
+- `422` if a field is missing or `timeout` is 0 or negative
 
-- [ ] The API accepts a `POST /monitors/{id}/heartbeat` request.
-- [ ] If the ID exists and the timer has NOT expired:
-  - [ ] Restart the countdown from the beginning (e.g., reset to 60 seconds).
-  - [ ] Return `200 OK`.
-- [ ] If the ID does not exist:
-  - [ ] Return `404 Not Found`.
+### Send a heartbeat
 
-### User Story 3: The Alert (Failure State)
+`POST /monitors/device-123/heartbeat`
 
-**As a** support engineer,
-**I want to** be notified immediately if a device stops sending heartbeats,
-**So that** I can deploy a repair team.
+Response `200 OK`:
 
-**Acceptance Criteria:**
+```json
+{"message": "Heartbeat received"}
+```
 
-- [ ] If the timer for `device-123` reaches 0 seconds (no heartbeat received):
-  - [ ] The system must internally "fire" an alert.
-  - [ ] **Implementation:** For this project, simply `console.log` a JSON object: `{"ALERT": "Device device-123 is down!", "time": <timestamp>}`. (Or simulate sending an email).
-  - [ ] The monitor status changes to `down`.
+- `404` if the monitor doesn't exist
 
----
+The timer goes back to the full timeout. If the monitor was paused or down, it becomes `active` again.
 
-## 6. Bonus User Story (The "Snooze" Button)
+### Pause a monitor
 
-**As a** maintenance technician,
-**I want to** pause monitoring while I am repairing a device,
-**So that** I don't trigger false alarms.
+`POST /monitors/device-123/pause`
 
-**Acceptance Criteria:**
+Response `200 OK`:
 
-- [ ] Create a `POST /monitors/{id}/pause` endpoint.
-- [ ] When called, the timer stops completely. No alerts will fire.
-- [ ] Calling the heartbeat endpoint again automatically "un-pauses" the monitor and restarts the timer.
+```json
+{"message": "Monitor device-123 is paused"}
+```
 
----
+- `404` if the monitor doesn't exist
 
-## 7. The "Developer's Choice" Challenge
+While paused, no alert is sent. The next heartbeat un-pauses it.
 
-We value engineers who look for "what's missing."
+### Get a monitor's status
 
-**Task:** Identify **one** additional feature that makes this system more robust or user-friendly.
+`GET /monitors/device-123`
 
-1.  **Implement it.**
-2.  **Document it:** Explain _why_ you added it in your README.
+Response `200 OK`:
 
----
+```json
+{"id": "device-123", "status": "active", "timeout": 60, "seconds_left": 42}
+```
 
-## 8. Documentation Requirements
+- `404` if the monitor doesn't exist
+- `seconds_left` is `null` when the monitor is paused or down
 
-Your final `README.md` must replace these instructions. It must cover:
+### The alert
 
-1.  **Architecture Diagram**
-2.  **Setup Instructions**
-3.  **API Documentation**
-4.  **The Developer's Choice:** Explanation of your added feature.
+When a timer runs out, this is printed in the server console:
 
----
+```json
+{"ALERT": "Device device-123 is down!", "time": 1763712000.12}
+```
 
-Submit your repo link via the [online](https://forms.cloud.microsoft/e/bLyGT3byxx) form.
+## Developer's Choice: GET /monitors/{id}
 
-## 🛑 Pre-Submission Checklist
+I added an endpoint to check a monitor's status.
 
-**WARNING:** Before you submit your solution, you **MUST** pass every item on this list.
-If you miss any of these critical steps, your submission will be **automatically rejected** and you will **NOT** be invited to an interview.
+Without it, the only way to know if a device is up or down is to watch the server console. That isn't practical for a support engineer. With this endpoint you can:
 
-### 1. 📂 Repository & Code
+- check that a new device is being tracked
+- see how many seconds are left before an alert fires
+- confirm a device is back to `active` after a repair
+- check that a device is still paused during maintenance
 
-- [ ] **Public Access:** Is your GitHub repository set to **Public**? (We cannot review private repos).
-- [ ] **Clean Code:** Did you remove unnecessary files (like `node_modules`, `.env` with real keys, or `.DS_Store`)?
-- [ ] **Run Check:** if we clone your repo and run `npm start` (or equivalent), does the server start immediately without crashing?
+For a monitoring system, being able to see the current state is as important as the alert itself.
 
-### 2. 📄 Documentation (Crucial)
+## Design choices and limitations
 
-- [ ] **Architecture Diagram:** Did you include a visual Diagram (Flowchart or Sequence Diagram) in the README?
-- [ ] **README Swap:** Did you **DELETE** the original instructions (the problem brief) from this file and replace it with your own documentation?
-- [ ] **API Docs:** Is there a clear list of Endpoints and Example Requests in the README?
-
-### 3. 🧹 Git Hygiene
-
-- [ ] **Commit History:** Does your repo have multiple commits with meaningful messages? (A single "Initial Commit" is a red flag).
-
----
-
-**Ready?**
-If you checked all the boxes above, submit your repository link in the application form. Good luck! 🚀
+- I store an expiry time for each monitor and use one background thread to check them all, instead of creating a separate timer for every device. It is simpler, and a heartbeat only needs to update one value.
+- Creating a monitor with an id that already exists returns `409` so an existing monitor isn't overwritten.
+- Data is kept in memory, so everything is lost when the server restarts. In a real system I would use a database or Redis.
+- The checker runs every second, so an alert can be up to about one second late.
+- The API and the checker thread share the same dictionary. In production I would add a `threading.Lock` to avoid race conditions.
+- Alerts are only printed. The next step would be sending an email to `alert_email` or calling a webhook.
